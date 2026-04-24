@@ -1,22 +1,51 @@
 const crypto = require('crypto');
+const fs = require('fs').promises;
+const path = require('path');
+
+const STORAGE_DIR = path.join(__dirname, '..', 'uploads');
+const STORE_FILE = path.join(STORAGE_DIR, 'vectorStore.json');
 
 function uuidv4() {
   return crypto.randomUUID();
 }
 
-// Simple in-memory vector store for MVP
+// File-backed vector store for Render persistence
 class VectorStore {
   constructor() {
     this.documents = [];
-    this.initialized = true;
+    this.initialized = false;
   }
 
   async initialize() {
-    console.log('In-memory vector store initialized');
-    return true;
+    if (this.initialized) return true;
+    try {
+      await fs.mkdir(STORAGE_DIR, { recursive: true });
+      try {
+        const data = await fs.readFile(STORE_FILE, 'utf8');
+        this.documents = JSON.parse(data);
+        console.log(`Loaded ${this.documents.length} chunks from disk.`);
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+        console.log('No existing vector store found on disk, starting fresh.');
+      }
+      this.initialized = true;
+      return true;
+    } catch (err) {
+      console.error('Failed to initialize vector store:', err);
+      return false;
+    }
+  }
+
+  async _saveStore() {
+    try {
+      await fs.writeFile(STORE_FILE, JSON.stringify(this.documents), 'utf8');
+    } catch (err) {
+      console.error('Failed to save vector store to disk:', err);
+    }
   }
 
   async addDocuments(chunks, embeddings, metadata) {
+    await this.initialize();
     const ids = chunks.map(() => uuidv4());
     
     chunks.forEach((chunk, index) => {
@@ -28,6 +57,7 @@ class VectorStore {
       });
     });
 
+    await this._saveStore();
     console.log(`Added ${chunks.length} chunks to vector store`);
     return ids;
   }
@@ -48,6 +78,8 @@ class VectorStore {
   }
 
   async query(queryEmbedding, nResults = 5) {
+    await this.initialize();
+    
     if (this.documents.length === 0) {
       return { documents: [], metadatas: [], distances: [] };
     }
@@ -72,14 +104,18 @@ class VectorStore {
   }
 
   async deleteByDocumentId(documentId) {
+    await this.initialize();
     const initialLength = this.documents.length;
     this.documents = this.documents.filter(doc => doc.metadata.document_id !== documentId);
+    
+    await this._saveStore();
     const deletedCount = initialLength - this.documents.length;
     console.log(`Deleted ${deletedCount} chunks for document ${documentId}`);
     return deletedCount;
   }
 
   async listDocuments() {
+    await this.initialize();
     const documentsMap = new Map();
     
     this.documents.forEach(doc => {
