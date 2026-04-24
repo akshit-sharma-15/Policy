@@ -96,6 +96,7 @@ function AdminPanel() {
     if (isAuthenticated) {
       loadDocuments();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   if (!isAuthenticated) {
